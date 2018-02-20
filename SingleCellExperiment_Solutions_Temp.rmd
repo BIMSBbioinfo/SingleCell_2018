@@ -180,3 +180,56 @@ suppressPackageStartupMessages(library(DelayedMatrixStats))
 rs = DelayedMatrixStats::rowSums2(assays(sce)$counts)
 sce = sce[rs > 100,]
 ```
+
+
+### What is the number of expressed genes per cell?
+
+First count the number of 0 values, per cell.
+Hint: DelayedMatrixStats::colCounts
+
+```{r dropout_counts}
+zero = DelayedMatrixStats::colCounts(assays(sce)$counts, value=0)
+
+dropout = round(zero/nrow(sce),2)
+```
+
+Add the dropout rate to the column descriptors of the SingleCellExperiment object.
+
+
+
+```{r dropout_coldata}
+colData(sce)$dropout = dropout
+
+head(colData(sce))
+```
+
+Now plot a histogram of dropout values.
+
+```{r dropout_plot, fig.width=4, fig.height=3}
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(ggplot2))
+
+as.data.frame(colData(sce)) %>%
+    ggplot(aes(dropout)) +
+    geom_histogram(bins=100)
+```
+
+
+### Plot the dropout rate Vs average expression 
+
+Now plot the dropout rate Vs the average expression of expressed genes, per cell.
+
+```{r, average_expression}
+csum   = DelayedMatrixStats::colSums2(assays(sce)$counts)
+ngenes = nrow(sce) - zero
+colData(sce)$total_counts = csum
+colData(sce)$mean_expr    = round(csum/ngenes, 2)
+```
+
+
+```{r, average_expression_plot, fig.width=4, fig.height=3}
+as.data.frame(colData(sce)) %>%
+    ggplot(aes(x=mean_expr, y=dropout)) +
+    geom_point()
+```
+
