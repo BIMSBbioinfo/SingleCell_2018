@@ -1,0 +1,182 @@
+---
+title: "Single Cell Analysis Workshop"
+author:
+- Jonathan Ronen
+- Vedran Franke
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_float: yes
+    number_sections: yes
+  html_notebook:
+    number_sections: yes
+    self_contained: yes
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache   = TRUE,
+                      include = FALSE, 
+                      eval    = FALSE)
+
+```
+
+
+# Intro
+
+Through this tutorial you should get familiar with the structure of the 
+SingleCellExperiment object, and basic functions for manipulation, 
+and quality control of the single cell expression data. 
+
+
+## Single Cell Experiment Object
+
+SingleCellExperiment object is a container for single cell data.
+It is build upon the SummarizedExperiment object, with the following structure
+
+![SingleCellExperiment](SingleCellExperiment.svg)
+
+
+
+
+## The Data
+
+For this workshop we will use the publicly available data set, provided by
+10x genomics.
+The count matrix can be found on the following link:
+[link](https://s3-us-west-2.amazonaws.com/10x.files/samples/cell/pbmc3k/pbmc3k_filtered_gene_bc_matrices.tar.gz).
+
+We have pre-processed the data into a hdf5 file. **hdf5** file format is constructed
+for fast manipulation with array based data types (i.e. matrices). It stores
+indexed location for fast random access. You can consider the hdf5 file like
+a 2d bam file.
+
+
+## Preliminaries:
+
+If you haven't installed the required R packages, please install them now:
+```{r install, eval=FALSE, include=TRUE}
+source("https://bioconductor.org/biocLite.R")
+
+biocLite(c("data.table","DelayedArray","DelayedMatrixStats","dplyr","GenomicAlignments","GenomicFiles","GenomicRanges","HDF5Array","pheatmap","Rsamtools","rtracklayer","scater","scran","SingleCellExperiment","stringr","yaml", "devtools"))
+
+devtools::install_github("csoneson/iSEE", ref='3.4')
+
+devtools::install_github("bimsbbioinfo/netSmooth", ref='bioconductor_3_6')
+
+```
+
+In addition, please install the following packages:
+
+ggplot2, biomaRt, cowplot, ComplexHeatmap, dplyr
+
+```{r install2, includ=TRUE, eval=FALSE}
+source("https://bioconductor.org/biocLite.R")
+
+biocLite(c('ggplot2','biomaRt','cowplot','ComplexHeatmap','dplyr'))
+```
+
+
+
+
+# Exercises
+
+### Constructing SingleCellExperiment Objects
+
+From the files in the data folder construct the SingleCellExperiment object.
+Hint: h5ls, HDF5Array, SingleCellExperiment
+
+First you will need to connect to the hdf5 object. Then you will
+pass the object to the SingleCellExperiment constructor.
+
+To connect to the hdf5 file, you will need the name of the saved matrix.
+This information can be obtained using the h5ls function
+
+```{r sce_construct, cache=TRUE}
+suppressPackageStartupMessages(library(HDF5Array))
+input_hdf5 = 's10x_3cells.hdf5'
+name = h5ls(input_hdf5)$name
+
+mat = HDF5Array(file=input_hdf5, name=name)
+
+suppressPackageStartupMessages(library(SingleCellExperiment))
+sce = SingleCellExperiment(
+     assays  = list(counts=mat))
+
+```
+
+### What is the size of the constructed single cell experient?
+
+```{r sce_size}
+print(object.size(sce),units='Mb')
+```
+### What do the following functions do?
+
+assays
+
+rowData
+
+colData
+
+
+### Add the gene names, and biotypes to the SingleCellExperiment object
+
+The table **genes.tsv** contains ENSEMBL gene ids for the corresponding 
+rows of the expression matrix. Load the table into R.
+
+Using the biomaRt package, download the gene names and gene biotypes
+for the genes in the SingleCellExperiment object, and update the gene annotations.
+Hint: useMart, getBM, rowData
+
+```{r gene_names}
+gene_names = read.table('genes.tsv')
+
+library(biomaRt)
+mart = useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl")
+bm   = getBM(mart       = mart,
+             attributes = c('ensembl_gene_id','hgnc_symbol','gene_biotype'),
+             filters    = 'ensembl_gene_id',
+             values     = gene_names$V1)
+
+bm = bm[match(gene_names$V1, bm$ensembl_gene_id),]
+
+rowData(sce) = DataFrame(bm)
+
+
+head(rowData(sce))
+```
+
+### Remove all genes which could not be annotated in the previous step
+
+Remove all rows with NA values.
+
+```{r remove_rows}
+sce = sce[!is.na(rowData(sce)$ensembl_gene_id)]
+```
+
+
+# SingleCellExperiment Exploration
+
+In this step we will learn how to extract the basic information from 
+the SingleCellExperiment object.
+For this we will use function from the DelayedMatrixStats package.
+DelayedMatrixStats package
+
+### How many lincRNAs are analyzed in the data?
+
+```{r, lincRNA}
+sum(rowData(sce)$gene_biotype == 'lincRNA')
+```
+
+
+### Remove all genes which have less than 100 reads in all cells
+
+Hint: DelayedMatrixStats package
+
+```{r filter_genes}
+suppressPackageStartupMessages(library(DelayedMatrixStats))
+rs = DelayedMatrixStats::rowSums2(assays(sce)$counts)
+sce = sce[rs > 100,]
+```
